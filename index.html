@@ -246,22 +246,23 @@ const supa=supabase.createClient(SUPA_URL,SUPA_KEY);
 
 async function dbCargarHabitaciones(){
   const {data,error}=await supa.from('habitaciones').select('*').order('id');
-  if(error){console.error('Error cargando habitaciones:',error);return;}
+  if(error){console.error('Error cargando habitaciones:',error);mostrarEstadoConexion(false);return;}
   data.forEach(row=>{
     const r=rooms.find(x=>x.id===row.id);
     if(r){
       r.status=row.status||'libre';
-      r.tipo=row.tipo;
-      r.horas=row.horas;
-      r.personas=row.personas;
+      r.tipo=row.tipo||null;
+      r.horas=row.horas||null;
+      r.personas=row.personas||null;
       r.dias=row.dias||1;
       r.cobro=row.cobro||0;
-      r.cliente=row.cliente;
+      r.cliente=row.cliente||null;
       r.nota=row.nota||'';
-      r.entrada=row.entrada;
-      r.salidaTs=row.salida_ts;
+      r.entrada=row.entrada||null;
+      r.salidaTs=row.salida_ts||null;
     }
   });
+  mostrarEstadoConexion(true);
   renderRooms();
 }
 
@@ -287,7 +288,8 @@ async function dbGuardarTurno(){
     ingresos:turnoActual.ingresos,
     logs:turnoActual.logs,
     fin:turnoActual.fin||null,
-    nota_cierre:turnoActual.notaCierre||null
+    nota_cierre:turnoActual.notaCierre||null,
+    activo:turnoActual.fin?false:true
   }).eq('id',turnoActual.dbId);
 }
 
@@ -297,7 +299,8 @@ async function dbCrearTurno(nombre,esAdmin){
     es_admin:esAdmin,
     inicio:new Date().toISOString(),
     ingresos:0,
-    logs:[]
+    logs:[],
+    activo:true
   }).select().single();
   if(error){console.error('Error creando turno:',error);return null;}
   return data.id;
@@ -323,25 +326,36 @@ async function dbCargarTurnos(){
 
 // Realtime: escuchar cambios en habitaciones
 function iniciarRealtime(){
+  // Suscripción realtime
   supa.channel('habitaciones-cambios')
-    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'habitaciones'},payload=>{
-      const row=payload.new;
+    .on('postgres_changes',{event:'*',schema:'public',table:'habitaciones'},payload=>{
+      const row=payload.new||payload.old;
+      if(!row)return;
       const r=rooms.find(x=>x.id===row.id);
       if(r){
         r.status=row.status||'libre';
-        r.tipo=row.tipo;
-        r.horas=row.horas;
-        r.personas=row.personas;
+        r.tipo=row.tipo||null;
+        r.horas=row.horas||null;
+        r.personas=row.personas||null;
         r.dias=row.dias||1;
         r.cobro=row.cobro||0;
-        r.cliente=row.cliente;
+        r.cliente=row.cliente||null;
         r.nota=row.nota||'';
-        r.entrada=row.entrada;
-        r.salidaTs=row.salida_ts;
+        r.entrada=row.entrada||null;
+        r.salidaTs=row.salida_ts||null;
         renderRooms();
       }
+      mostrarEstadoConexion(true);
     })
-    .subscribe();
+    .subscribe(status=>{
+      mostrarEstadoConexion(status==='SUBSCRIBED');
+    });
+
+  // Polling de respaldo cada 30 segundos
+  setInterval(async()=>{
+    await dbCargarHabitaciones();
+    mostrarEstadoConexion(true);
+  }, 30000);
 }
 
 // Indicador de conexión
@@ -592,10 +606,30 @@ function doLoginAdmin(){
   iniciarTurno('Administrador',true);
 }
 async function iniciarTurno(nombre,esAdmin){
-  turnoActual={nombre,esAdmin,inicio:now().toISOString(),logs:[],ingresos:0};
-  // Guardar turno en DB
-  const dbId=await dbCrearTurno(nombre,esAdmin);
-  if(dbId) turnoActual.dbId=dbId;
+  // Verificar si ya existe un turno activo con este nombre
+  const {data:turnosActivos}=await supa.from('turnos')
+    .select('*').eq('nombre',nombre).eq('activo',true).is('fin',null).limit(1);
+
+  if(turnosActivos&&turnosActivos.length>0){
+    // Reconectar al turno existente
+    const t=turnosActivos[0];
+    turnoActual={
+      nombre:t.nombre,
+      esAdmin:t.es_admin,
+      inicio:t.inicio,
+      logs:Array.isArray(t.logs)?t.logs:[],
+      ingresos:t.ingresos||0,
+      dbId:t.id
+    };
+    addLog('in','Sesión reconectada: '+nombre);
+  } else {
+    // Crear nuevo turno
+    turnoActual={nombre,esAdmin,inicio:now().toISOString(),logs:[],ingresos:0};
+    const dbId=await dbCrearTurno(nombre,esAdmin);
+    if(dbId) turnoActual.dbId=dbId;
+    addLog('in','Turno iniciado: '+nombre);
+  }
+
   document.getElementById('turno-nombre-display').textContent=nombre;
   document.getElementById('login-screen').style.display='none';
   document.getElementById('main-app').style.display='block';
@@ -604,7 +638,6 @@ async function iniciarTurno(nombre,esAdmin){
   await dbCargarTurnos();
   iniciarRealtime();
   mostrarEstadoConexion(true);
-  addLog('in','Turno iniciado: '+nombre);
 }
 function cerrarTurno(){
   const totalVentas=turnoActual.ingresos;

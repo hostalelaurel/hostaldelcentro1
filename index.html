@@ -267,19 +267,25 @@ async function dbCargarHabitaciones(){
 }
 
 async function dbGuardarHabitacion(r){
-  await supa.from('habitaciones').upsert({
-    id:r.id,
+  const payload={
     status:r.status,
-    tipo:r.tipo,
-    horas:r.horas,
-    personas:r.personas,
-    dias:r.dias,
-    cobro:r.cobro,
-    cliente:r.cliente,
+    tipo:r.tipo||null,
+    horas:r.horas||null,
+    personas:r.personas||null,
+    dias:r.dias||1,
+    cobro:r.cobro||0,
+    cliente:r.cliente||null,
     nota:r.nota||'',
-    entrada:r.entrada,
-    salida_ts:r.salidaTs
-  });
+    entrada:r.entrada||null,
+    salida_ts:r.salidaTs||null
+  };
+  const {error}=await supa.from('habitaciones').update(payload).eq('id',r.id);
+  if(error){
+    console.error('Error guardando hab '+r.id+':',error.message);
+    mostrarEstadoConexion(false);
+  } else {
+    mostrarEstadoConexion(true);
+  }
 }
 
 async function dbGuardarTurno(){

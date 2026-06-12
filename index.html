@@ -660,7 +660,7 @@ async function iniciarTurno(nombre,esAdmin){
       esAdmin:t.es_admin,
       inicio:t.inicio,
       logs:[], // logs frescos — los históricos están en BD
-      ingresos:t.ingresos||0,
+      ingresos:0, // ingresos frescos para esta sesión
       dbId:t.id
     };
     addLog('in','Sesión reconectada: '+nombre);
@@ -734,10 +734,9 @@ function cerrarTurno(){
           const em=e.msg.match(/\+\$([\d.,]+)/);
           return`<span style="color:#1D9E75;font-weight:600;margin-left:6px">+ ${nm?nm[1]:''} $${em?em[1]:''}</span>`;
         }).join('');
-        // Calcular total real = check-in + extensiones
-        const montoBase=monto?parseInt(monto[0].replace(/[.$]/g,'').replace(/\./g,''))||0:0;
-        const montoExts=extLogsT.reduce((s,e)=>{const m=e.msg.match(/\+\$([\d.,]+)/);return s+(m?parseInt(m[1].replace(/\./g,''))||0:0);},0);
-        const totalHab=montoBase+montoExts;
+        // Calcular total real usando r.cobro guardado (ya incluye extensiones)
+        const habRoom=rooms.find(x=>x.id===parseInt(habNum));
+        const totalHab=habRoom&&habRoom.cobro>0?habRoom.cobro:(monto?parseInt(monto[0].replace(/\D/g,''))||0:0);
         const totalFmt='$'+totalHab.toLocaleString('es-CL');
         return`<div style="display:grid;grid-template-columns:32px 42px 1fr auto;gap:4px;align-items:center;padding:4px 0;border-bottom:0.5px solid #f0f0eb;font-size:11px">
           <span style="color:#9b9a95">${v.time}</span>

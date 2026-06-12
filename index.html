@@ -553,12 +553,24 @@ function renderRooms(){
       if(rem!==null && rem<=10*60000) barC='bar-low';
       else if(elapsed2>75*60000) barC='bar-mid';
       const crono=r.entrada?fmtCrono(r.entrada):'00:00';
-      const vence=rem!==null&&rem>0?fmtSalida(new Date(r.salidaTs)):'⚠ Tiempo cumplido';
+      let vence='';
+      if(r.tipo==='noche'&&r.entrada){
+        const llegada=new Date(r.entrada);
+        const diasNom=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+        const diaLleg=diasNom[llegada.getDay()];
+        const fechaLleg=llegada.toLocaleDateString('es-CL',{day:'numeric',month:'long'});
+        const horaLleg=fmt(llegada);
+        const llegTxt='llegó el '+diaLleg+' '+fechaLleg+' a las '+horaLleg;
+        const saleTxt=rem!==null&&rem>0?fmtSalida(new Date(r.salidaTs)):'⚠ Tiempo cumplido';
+        vence=llegTxt;
+      } else {
+        vence=rem!==null&&rem>0?fmtSalida(new Date(r.salidaTs)):'⚠ Tiempo cumplido';
+      }
       const txtC=rc==='por-vencer'?(rem<=0?'crit':'warn'):'';
       const porVencerHora = r.tipo==='hora' && rem!==null && rem<=5*60000 && rem>0;
       const cronoColor = porVencerHora ? '#C0001A' : rc==='por-vencer' ? '#854F0B' : '#1a1a18';
       const cronoAnim = porVencerHora ? 'animation:pulse 1s infinite' : '';
-      timerHtml=`<div class="timer-bar-wrap" style="margin-top:8px"><div class="timer-bar ${barC}" style="width:${pct}%"></div></div><div style="font-size:22px;font-weight:700;letter-spacing:2px;color:${cronoColor};margin-top:6px;font-variant-numeric:tabular-nums;line-height:1;${cronoAnim}">${crono}</div><div style="font-size:10px;color:${rc==='por-vencer'?'#854F0B':'#9b9a95'};margin-top:3px">${vence}</div>`;
+      timerHtml=`<div class="timer-bar-wrap" style="margin-top:8px"><div class="timer-bar ${barC}" style="width:${pct}%"></div></div><div style="font-size:22px;font-weight:700;letter-spacing:2px;color:${cronoColor};margin-top:6px;font-variant-numeric:tabular-nums;line-height:1;${cronoAnim}">${crono}</div><div style="font-size:10px;color:${rc==='por-vencer'?'#854F0B':'#9b9a95'};margin-top:3px">${vence.includes('|||')?vence.split('|||').join('<br>'):vence}</div>`;
     }
     let tipoLabel='';
     if(r.status!=='libre'&&r.status!=='mantencion'){
@@ -851,12 +863,25 @@ function renderAdminPanel(){
           const ventasHtml=ventas.length>0
             ? ventas.map(v=>{
                 const habMatch=v.msg.match(/Hab\. (\d+)/);
-                const hab=habMatch?'Hab. '+habMatch[1]+' — ':'';
-                const desc=hab+v.msg.replace(/.*— /,'');
-                const monto=v.msg.match(/\$[\d.,]+/);
-                return`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:#444">
-                  <span>${v.time} · ${desc}</span>
-                  <span style="font-weight:600;color:#0F6E56;margin-left:8px">${monto?monto[0]:''}</span>
+                const habNum=habMatch?habMatch[1].padStart(2,'0'):'';
+                const hab=habNum?'Hab. '+habNum+' — ':'';
+                const tipoMatch=v.msg.match(/\(([^)]+)\)/);
+                const tipo=tipoMatch?tipoMatch[1]:'';
+                const montoBase=v.msg.match(/\$[\d.,]+/);
+                // Buscar extensiones de esta hab en los logs del turno
+                const extT=t.logs.filter(l=>l.tipo==='in'&&l.msg.includes('Hab. '+habNum)&&l.msg.includes('Extensión'));
+                const extHtmlA=extT.map(e=>{
+                  const nm=e.msg.match(/Extensión (.+?) \+/);
+                  const em=e.msg.match(/\+\$([\d.,]+)/);
+                  return` <span style="color:#1D9E75">+ ${nm?nm[1]:''} $${em?em[1]:''}</span>`;
+                }).join('');
+                // Total = base + extensiones
+                const baseVal=montoBase?parseInt(montoBase[0].replace(/\D/g,''))||0:0;
+                const extVal=extT.reduce((s,e)=>{const m=e.msg.match(/\+\$([\d.,]+)/);return s+(m?parseInt(m[1].replace(/\./g,''))||0:0);},0);
+                const total=baseVal+extVal;
+                return`<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:0.5px solid #f0f0eb;color:#444">
+                  <span>${v.time} · ${hab}${tipo} <span style="color:#9b9a95">${montoBase?montoBase[0]:''}</span>${extHtmlA}</span>
+                  <span style="font-weight:700;color:#0F6E56;margin-left:8px;white-space:nowrap">$${total.toLocaleString('es-CL')}</span>
                 </div>`;
               }).join('')
             : '<div style="font-size:11px;color:#9b9a95">Sin ventas.</div>';
@@ -1063,7 +1088,19 @@ function openRoom(id){
     const pct=rem!==null?Math.max(0,Math.min(100,Math.round(rem/total*100))):100;
     const barC=pct>50?'bar-ok':pct>15?'bar-mid':'bar-low';
       const crono=r.entrada?fmtCrono(r.entrada):'00:00';
-      const vence=rem!==null&&rem>0?fmtSalida(new Date(r.salidaTs)):'⚠ Tiempo cumplido';
+      let vence='';
+      if(r.tipo==='noche'&&r.entrada){
+        const llegada=new Date(r.entrada);
+        const diasNom=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+        const diaLleg=diasNom[llegada.getDay()];
+        const fechaLleg=llegada.toLocaleDateString('es-CL',{day:'numeric',month:'long'});
+        const horaLleg=fmt(llegada);
+        const llegTxt='llegó el '+diaLleg+' '+fechaLleg+' a las '+horaLleg;
+        const saleTxt=rem!==null&&rem>0?fmtSalida(new Date(r.salidaTs)):'⚠ Tiempo cumplido';
+        vence=llegTxt;
+      } else {
+        vence=rem!==null&&rem>0?fmtSalida(new Date(r.salidaTs)):'⚠ Tiempo cumplido';
+      }
     modal.innerHTML=`
       <h2><i class="ti ti-door"></i> Hab. ${num} — ${rc==='por-vencer'?'⚠ Por vencer':'Ocupada'}</h2>
       <div class="minfo">

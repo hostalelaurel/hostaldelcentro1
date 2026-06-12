@@ -707,13 +707,26 @@ async function iniciarTurno(nombre,esAdmin){
   iniciarRealtime();
   mostrarEstadoConexion(true);
 }
-function cerrarTurno(){
-  const totalVentas=turnoActual.ingresos;
-  const checkins=turnoActual.logs.filter(l=>l.tipo==='in'&&l.msg.includes('Check-in')).length;
-  const checkouts=turnoActual.logs.filter(l=>l.tipo==='out'&&l.msg.includes('Check-out')).length;
+async function cerrarTurno(){
+  // Cargar datos actualizados desde Supabase
+  let dbIngresos=turnoActual.ingresos;
+  let dbLogs=turnoActual.logs;
+  if(turnoActual.dbId){
+    const {data:t}=await supa.from('turnos').select('ingresos,logs').eq('id',turnoActual.dbId).single();
+    if(t){
+      dbIngresos=t.ingresos||0;
+      const logsDB=Array.isArray(t.logs)?t.logs:[];
+      const tsExist=new Set(logsDB.map(l=>l.ts));
+      const logsNew=turnoActual.logs.filter(l=>!tsExist.has(l.ts));
+      dbLogs=[...logsDB,...logsNew];
+    }
+  }
+  const totalVentas=dbIngresos;
+  const checkins=dbLogs.filter(l=>l.tipo==='in'&&l.msg.includes('Check-in')).length;
+  const checkouts=dbLogs.filter(l=>l.tipo==='out'&&l.msg.includes('Check-out')).length;
 
   // Ventas = logs de check-in con monto
-  const ventas=turnoActual.logs.filter(l=>l.tipo==='in'&&l.msg.includes('Check-in')&&!l.msg.includes('reconectada'));
+  const ventas=dbLogs.filter(l=>l.tipo==='in'&&l.msg.includes('Check-in')&&!l.msg.includes('reconectada'));
   const detalleHtml=ventas.length>0
     ? [...ventas].reverse().map(v=>{
         // extraer monto del mensaje
@@ -736,7 +749,7 @@ function cerrarTurno(){
   // Detalle compacto sin scroll: tabla densa
   // Buscar checkouts con exceso en los logs del turno
   const excesos={};
-  turnoActual.logs.filter(l=>l.tipo==='out'&&l.msg.includes('Exceso')).forEach(l=>{
+  dbLogs.filter(l=>l.tipo==='out'&&l.msg.includes('Exceso')).forEach(l=>{
     const habMatch=l.msg.match(/Hab\.\s*(\d+)/);
     const excesoMatch=l.msg.match(/Exceso:\s*([\dh ms]+)/);
     if(habMatch&&excesoMatch) excesos[habMatch[1].padStart(2,'0')]=excesoMatch[1].trim();

@@ -1177,7 +1177,8 @@ function extender(id){
   // Sumar tiempo desde salidaTs actual (no desde ahora)
   const salidaActual=r.salidaTs?new Date(r.salidaTs):now();
   r.salidaTs=new Date(salidaActual.getTime()+ext.msExtra).toISOString();
-  if(ext.horas) r.horas=(r.horas||0)+ext.horas;
+  // Solo sumar horas si es extensión de hora, no de noche
+  if(ext.horas&&r.tipo==='hora') r.horas=(r.horas||0)+ext.horas;
   r.cobro=(r.cobro||0)+ext.cobro;
   // Sumar al turno
   ingresosDia+=ext.cobro;

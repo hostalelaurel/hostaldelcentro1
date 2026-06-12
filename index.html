@@ -265,6 +265,7 @@ async function dbCargarHabitaciones(){
       r.entrada=row.entrada||null;
       r.salidaTs=row.salida_ts||null;
       r.extensiones=Array.isArray(row.extensiones)?row.extensiones:[];
+      r.tieneExtNoche=row.tiene_ext_noche||false;
     }
   });
   mostrarEstadoConexion(true);
@@ -283,7 +284,8 @@ async function dbGuardarHabitacion(r){
     nota:r.nota||'',
     entrada:r.entrada||null,
     salida_ts:r.salidaTs||null,
-    extensiones:r.extensiones||[]
+    extensiones:r.extensiones||[],
+    tiene_ext_noche:r.tieneExtNoche||false
   };
   const {error}=await supa.from('habitaciones').update(payload).eq('id',r.id);
   if(error){
@@ -358,6 +360,7 @@ function iniciarRealtime(){
         r.entrada=row.entrada||null;
         r.salidaTs=row.salida_ts||null;
         r.extensiones=Array.isArray(row.extensiones)?row.extensiones:[];
+      r.tieneExtNoche=row.tiene_ext_noche||false;
         renderRooms();
       }
       mostrarEstadoConexion(true);
@@ -381,17 +384,17 @@ let cfg={avisarMin:5,nocheHoras:10,tarifasHora:{2:15000,3:20000,4:25000},tarifas
 const CLAVE_TURNO='1234';
 const CLAVE_ADMIN='admin2024';
 const EXTENSIONES={
-  'hora1': {label:'1 hora extra',   horas:1,  msExtra:1*3600000,  cobro:8000},
-  'hora2': {label:'2 horas extra',  horas:2,  msExtra:2*3600000,  cobro:15000},
-  'noche1':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:14000},
-  'noche2':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:9000},
-  'noche3':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:4000},
+  'hora1': {label:'1 hora extra',   horas:1,  msExtra:1*3600000,  cobro:8000,  esNoche:false},
+  'hora2': {label:'2 horas extra',  horas:2,  msExtra:2*3600000,  cobro:15000, esNoche:false},
+  'noche1':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:14000, esNoche:true},
+  'noche2':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:9000,  esNoche:true},
+  'noche3':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:4000,  esNoche:true},
 };
 let turnoActual=null; // {nombre, inicio, logs:[], ingresos:0}
 let soloLectura=false;
 let todosLosTurnos=[]; // historial global
 let adminTab='turnos';
-let rooms=[1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21].map(id=>({id,status:'libre',tipo:null,horas:null,personas:null,dias:1,cobro:0,cliente:null,nota:'',entrada:null,salidaTs:null,extensiones:[]}));
+let rooms=[1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21].map(id=>({id,status:'libre',tipo:null,horas:null,personas:null,dias:1,cobro:0,cliente:null,nota:'',entrada:null,salidaTs:null,extensiones:[],tieneExtNoche:false}));
 let logs=[];
 let filtro='todas';
 let ingresosDia=0;
@@ -569,7 +572,8 @@ function renderRooms(){
     const estClsMap={libre:'est-libre',ocupado:'est-ocupado','por-vencer':'est-warn',mantencion:'est-mant'};
     const mantHtml = rc==='mantencion' ? `<div style="display:flex;align-items:center;gap:6px;margin-top:10px;color:#C0001A"><i class="ti ti-tool" style="font-size:18px"></i><span style="font-size:12px;font-weight:600">Cerrada por mantención</span></div>` : '';
     const pillColor = rc==='por-vencer' ? {bg:'#FAEEDA',txt:'#7C3A00'} : r.tipo==='noche' ? {bg:'#EEEDFE',txt:'#3C3489'} : {bg:'#E6F1FB',txt:'#0C447C'};
-    const tipoClass = (r.status==='ocupado'||rc==='por-vencer') ? (r.tipo==='noche'?'tipo-noche':'tipo-hora') : '';
+    const esColorNoche = r.tipo==='noche' || r.tieneExtNoche;
+    const tipoClass = (r.status==='ocupado'||rc==='por-vencer') ? (esColorNoche?'tipo-noche':'tipo-hora') : '';
     return`<div class="room ${rc} ${tipoClass}" onclick="openRoom(${r.id})">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
         <div style="display:flex;align-items:center;gap:6px">
@@ -721,10 +725,19 @@ function cerrarTurno(){
         const tipo=tipoMatch?tipoMatch[1]:'';
         const monto=v.msg.match(/\$[\d.,]+/);
         const exceso=excesos[habNum];
+        // Buscar extensiones de esta habitación en los logs del turno
+        const extLogsT=turnoActual.logs.filter(l=>
+          l.tipo==='in' && l.msg.includes('Hab. '+habNum) && l.msg.includes('Extensión')
+        );
+        const extHtmlT=extLogsT.map(e=>{
+          const nm=e.msg.match(/Extensión (.+?) \+\$/);
+          const em=e.msg.match(/\+\$([\d.,]+)/);
+          return`<span style="color:#1D9E75;font-weight:600;margin-left:6px">+ ${nm?nm[1]:''} $${em?em[1]:''}</span>`;
+        }).join('');
         return`<div style="display:grid;grid-template-columns:32px 42px 1fr auto;gap:4px;align-items:center;padding:3px 0;border-bottom:0.5px solid #f0f0eb;font-size:11px">
           <span style="color:#9b9a95">${v.time}</span>
           <span style="font-weight:600;color:#1a1a18">${hab}</span>
-          <span style="color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${tipo}${exceso?` <span style="color:#C0001A;font-weight:700;margin-left:4px">⚠ +${exceso}</span>`:''}</span>
+          <span style="color:#444;overflow:hidden;text-overflow:ellipsis">${tipo}${extHtmlT}${exceso?` <span style="color:#C0001A;font-weight:700;margin-left:4px">⚠ +${exceso}</span>`:''}</span>
           <span style="font-weight:600;color:#0F6E56;white-space:nowrap">${monto?monto[0]:''}</span>
         </div>`;
       }).join('')
@@ -940,7 +953,6 @@ function renderLog(){
     const notaVal=logNotas[key]||'';
     let inTxt='<span style="color:#ccc">—</span>';
     if(g.in){
-      // extraer tipo y monto del mensaje
       const inMsg=g.in.msg;
       const tipoMatch=inMsg.match(/\(([^)]+)\)/);
       const tipo=tipoMatch?tipoMatch[1]:'';
@@ -951,7 +963,19 @@ function renderLog(){
       const desc=esNoche
         ? `${cliente} (${tipo}) ${monto?monto[0]:''}`
         : `(${tipo}) ${monto?monto[0]:''}`;
-      inTxt=`<span style="font-size:14px;font-weight:700;color:#185FA5;margin-right:10px">${g.in.time}</span><span class="hab-log-in">${desc}</span>`;
+      // Buscar extensiones de esta habitación en los logs
+      const habId=g.hab;
+      const extLogs=turnoActual?turnoActual.logs.filter(l=>
+        l.tipo==='in' && l.msg.includes('Hab. '+habId.padStart(2,'0')) && l.msg.includes('Extensión')
+      ):[];
+      const extHtml=extLogs.length>0
+        ? extLogs.reverse().map(e=>{
+            const extDesc=e.msg.match(/Extensión (.+?) \+/);
+            const extMonto=e.msg.match(/\+(\$[\d.,]+)/);
+            return`<span style="color:#1D9E75;font-weight:600;margin-left:12px">Extensión ${extDesc?extDesc[1]:''} ${extMonto?extMonto[1]:''}</span>`;
+          }).join('')
+        :'';
+      inTxt=`<span style="font-size:14px;font-weight:700;color:#185FA5;margin-right:10px">${g.in.time}</span><span class="hab-log-in">${desc}</span>${extHtml}`;
     }
     const outTxt=g.out?`<span style="color:#9b9a95;font-size:10px">${g.out.time}</span> <span class="hab-log-out">Check-out${g.out.msg.includes('Exceso')?'  ⚠'+g.out.msg.split('Exceso:')[1]:''}</span>`:'<span style="color:#ccc;font-size:11px">En curso</span>';
     return`<div class="hab-log-row">
@@ -1177,14 +1201,14 @@ function extender(id){
   // Sumar tiempo desde salidaTs actual (no desde ahora)
   const salidaActual=r.salidaTs?new Date(r.salidaTs):now();
   r.salidaTs=new Date(salidaActual.getTime()+ext.msExtra).toISOString();
-  // Solo sumar horas si es extensión de hora, no de noche
-  if(ext.horas&&r.tipo==='hora') r.horas=(r.horas||0)+ext.horas;
+  // No modificar r.horas — la pastilla siempre muestra la tarifa original
   r.cobro=(r.cobro||0)+ext.cobro;
   // Sumar al turno
   ingresosDia+=ext.cobro;
   if(turnoActual) turnoActual.ingresos+=ext.cobro;
   if(!r.extensiones) r.extensiones=[];
   r.extensiones.push({label:ext.label, cobro:ext.cobro});
+  if(ext.esNoche) r.tieneExtNoche=true;
   notificadas.delete(id);
   addLog('in',`Hab. ${id<10?'0'+id:id} — Extensión ${ext.label} +$${ext.cobro.toLocaleString('es-CL')} — nuevo cierre: ${fmt(new Date(r.salidaTs))}`);
   dbGuardarHabitacion(r);
@@ -1210,7 +1234,7 @@ function checkout(id){
     }
   }
   addLog('out',`Hab. ${id<10?'0'+id:id} — Check-out: ${r.cliente}${excedidoTxt}`);
-  r.status='libre';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];
+  r.status='libre';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];r.tieneExtNoche=false;
   notificadas.delete(id);
   dbGuardarHabitacion(r);dbGuardarTurno();
   closeModal();renderRooms();
@@ -1218,7 +1242,7 @@ function checkout(id){
 
 function setMantDesdeLibre(id){
   const r=rooms.find(x=>x.id===id);
-  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];
+  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];r.tieneExtNoche=false;
   addLog('mant',`Hab. ${id<10?'0'+id:id} — Cerrada por mantención`);
   closeModal();renderRooms();
 }
@@ -1226,7 +1250,7 @@ function setMantDesdeLibre(id){
 function setMant(id){
   const r=rooms.find(x=>x.id===id);
   addLog('mant',`Hab. ${id<10?'0'+id:id} — Puesta en mantención`);
-  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];
+  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];r.tieneExtNoche=false;
   notificadas.delete(id);
   dbGuardarHabitacion(r);
   closeModal();renderRooms();

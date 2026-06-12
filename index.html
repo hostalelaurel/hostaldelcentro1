@@ -168,14 +168,18 @@ body{font-family:system-ui,sans-serif;background:#f5f5f0;color:#1a1a18;min-heigh
     <div class="header-btns" style="align-items:flex-start;gap:8px">
       <div style="display:flex;flex-direction:column;gap:4px">
         <div class="turno-badge"><i class="ti ti-user"></i> <span id="turno-nombre-display">—</span></div>
-        <button class="btn danger" style="font-size:11px;padding:4px 10px;justify-content:center" onclick="cerrarTurno()"><i class="ti ti-door-exit"></i> Cerrar turno</button>
+        <button class="btn danger" id="btn-cerrar-turno" style="font-size:11px;padding:4px 10px;justify-content:center" onclick="cerrarTurno()"><i class="ti ti-door-exit"></i> Cerrar turno</button>
       </div>
-      <button class="btn" onclick="toggleConfig()"><i class="ti ti-settings"></i> Tarifas</button>
+      <button class="btn" id="btn-tarifas" onclick="toggleConfig()"><i class="ti ti-settings"></i> Tarifas</button>
       <button class="btn" style="background:#1a1a18;color:#fff;border-color:#1a1a18" onclick="abrirAdmin()"><i class="ti ti-shield"></i> Admin</button>
     </div>
   </div>
 
-  <div class="alerts-banner" id="alerts-banner">
+  <div id="readonly-banner" style="display:none;background:#EEEDFE;border:1px solid #7C6FC4;border-radius:10px;padding:8px 16px;margin-bottom:10px;font-size:12px;color:#3C3489;gap:10px;align-items:center">
+  <i class="ti ti-eye" style="font-size:16px;flex-shrink:0"></i>
+  <span><strong>Modo solo lectura.</strong> Puedes visualizar el estado de las habitaciones pero no realizar cambios.</span>
+</div>
+<div class="alerts-banner" id="alerts-banner">
     <i class="ti ti-bell pulse" style="font-size:20px;color:#C0001A;flex-shrink:0"></i>
     <div id="alert-list" style="flex:1"></div>
   </div>
@@ -375,7 +379,15 @@ function mostrarEstadoConexion(ok){
 let cfg={avisarMin:5,nocheHoras:10,tarifasHora:{2:15000,3:20000,4:25000},tarifasNoche:{2:29000,3:45000,4:58000}};
 const CLAVE_TURNO='1234';
 const CLAVE_ADMIN='admin2024';
+const EXTENSIONES={
+  'hora1': {label:'1 hora extra',   horas:1,  msExtra:1*3600000,  cobro:8000},
+  'hora2': {label:'2 horas extra',  horas:2,  msExtra:2*3600000,  cobro:15000},
+  'noche1':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:14000},
+  'noche2':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:9000},
+  'noche3':{label:'noche extra',    horas:10, msExtra:10*3600000, cobro:4000},
+};
 let turnoActual=null; // {nombre, inicio, logs:[], ingresos:0}
+let soloLectura=false;
 let todosLosTurnos=[]; // historial global
 let adminTab='turnos';
 let rooms=[1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21].map(id=>({id,status:'libre',tipo:null,horas:null,personas:null,dias:1,cobro:0,cliente:null,nota:'',entrada:null,salidaTs:null}));
@@ -609,7 +621,25 @@ function doLogin(){
 function doLoginAdmin(){
   const clave=document.getElementById('login-clave').value;
   if(clave!==CLAVE_ADMIN){document.getElementById('login-error').style.display='block';document.getElementById('login-error').textContent='Clave de administrador incorrecta.';return;}
-  iniciarTurno('Administrador',true);
+  entrarModoAdmin();
+}
+
+async function entrarModoAdmin(){
+  soloLectura=true;
+  turnoActual={nombre:'Administrador',esAdmin:true,inicio:now().toISOString(),logs:[],ingresos:0,dbId:null};
+  document.getElementById('turno-nombre-display').textContent='👁 Administrador';
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('main-app').style.display='block';
+  await dbCargarHabitaciones();
+  await dbCargarTurnos();
+  iniciarRealtime();
+  mostrarEstadoConexion(true);
+  // Mostrar banner y ocultar controles de turno
+  document.getElementById('readonly-banner').style.display='flex';
+  document.getElementById('btn-cerrar-turno').style.display='none';
+  document.getElementById('btn-tarifas').style.display='none';
+  // Cursor normal en habitaciones
+  document.querySelectorAll('.room').forEach(r=>r.style.cursor='default');
 }
 async function iniciarTurno(nombre,esAdmin){
   // Verificar si ya existe un turno activo con este nombre
@@ -672,17 +702,27 @@ function cerrarTurno(){
   const inicio=new Date(turnoActual.inicio).toLocaleString('es-CL',{hour12:false});
   const fin=now().toLocaleString('es-CL',{hour12:false});
   // Detalle compacto sin scroll: tabla densa
+  // Buscar checkouts con exceso en los logs del turno
+  const excesos={};
+  turnoActual.logs.filter(l=>l.tipo==='out'&&l.msg.includes('Exceso')).forEach(l=>{
+    const habMatch=l.msg.match(/Hab\.\s*(\d+)/);
+    const excesoMatch=l.msg.match(/Exceso:\s*([\dh ms]+)/);
+    if(habMatch&&excesoMatch) excesos[habMatch[1].padStart(2,'0')]=excesoMatch[1].trim();
+  });
+
   const detalleCompacto=ventas.length>0
     ? [...ventas].reverse().map(v=>{
         const habMatch=v.msg.match(/Hab\. (\d+)/);
-        const hab=habMatch?'Hab.'+habMatch[1]:'';
+        const habNum=habMatch?habMatch[1].padStart(2,'0'):'';
+        const hab=habNum?'Hab.'+habNum:'';
         const tipoMatch=v.msg.match(/\(([^)]+)\)/);
         const tipo=tipoMatch?tipoMatch[1]:'';
         const monto=v.msg.match(/\$[\d.,]+/);
-        return`<div style="display:grid;grid-template-columns:32px 42px 1fr auto;gap:4px;align-items:center;padding:2px 0;border-bottom:0.5px solid #f0f0eb;font-size:11px">
+        const exceso=excesos[habNum];
+        return`<div style="display:grid;grid-template-columns:32px 42px 1fr auto;gap:4px;align-items:center;padding:3px 0;border-bottom:0.5px solid #f0f0eb;font-size:11px">
           <span style="color:#9b9a95">${v.time}</span>
           <span style="font-weight:600;color:#1a1a18">${hab}</span>
-          <span style="color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${tipo}</span>
+          <span style="color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${tipo}${exceso?` <span style="color:#C0001A;font-weight:700;margin-left:4px">⚠ +${exceso}</span>`:''}</span>
           <span style="font-weight:600;color:#0F6E56;white-space:nowrap">${monto?monto[0]:''}</span>
         </div>`;
       }).join('')
@@ -733,12 +773,16 @@ async function confirmarCierreTurno(){
   turnoActual.logs.unshift(entryCierre);
   todosLosTurnos.unshift(turnoActual);
   turnoActual=null;
+  soloLectura=false;
   logs=[];
   ingresosDia=0;
   closeModal();
   document.getElementById('login-nombre').value='';
   document.getElementById('login-clave').value='';
   document.getElementById('login-error').style.display='none';
+  document.getElementById('readonly-banner').style.display='none';
+  document.getElementById('btn-cerrar-turno').style.display='';
+  document.getElementById('btn-tarifas').style.display='';
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('main-app').style.display='none';
 }
@@ -932,6 +976,7 @@ function renderLog(){
 }
 
 function openRoom(id){
+  if(soloLectura) return; // Solo lectura: no permite cambios
   const r=rooms.find(x=>x.id===id);
   const rc=getRoomClass(r);
   const num=r.id<10?'0'+r.id:r.id;
@@ -1000,10 +1045,12 @@ function openRoom(id){
       </div>
       <div class="mf"><label>Extender estadía</label>
         <select id="m-ext">
-          <option value="0">Sin extensión</option>
-          <option value="1">+1 hora ($${cfg.tarifasHora[2].toLocaleString('es-CL')})</option>
-          <option value="2">+2 horas ($${cfg.tarifasHora[3].toLocaleString('es-CL')})</option>
-          <option value="3">+3 horas ($${cfg.tarifasHora[4].toLocaleString('es-CL')})</option>
+          <option value="">Sin extensión</option>
+          <option value="hora1">+1 hora — $8.000</option>
+          <option value="hora2">+2 horas — $15.000</option>
+          <option value="noche1">+1 noche extra — $14.000</option>
+          <option value="noche2">+1 noche extra — $9.000</option>
+          <option value="noche3">+1 noche extra — $4.000</option>
         </select>
       </div>
       <div class="macts" style="flex-wrap:wrap">
@@ -1119,16 +1166,32 @@ function guardarNota(id){
   }
 }
 
+const EXTENSIONES={
+  'hora1': {label:'+1 hora',   horas:1,   msExtra:1*3600000,    cobro:8000},
+  'hora2': {label:'+2 horas',  horas:2,   msExtra:2*3600000,    cobro:15000},
+  'noche1':{label:'+1 noche',  horas:null,msExtra:24*3600000,   cobro:14000},
+  'noche2':{label:'+1 noche',  horas:null,msExtra:24*3600000,   cobro:9000},
+  'noche3':{label:'+1 noche',  horas:null,msExtra:24*3600000,   cobro:4000},
+};
+
 function extender(id){
   guardarNota(id);
   const r=rooms.find(x=>x.id===id);
-  const extra=parseInt(document.getElementById('m-ext').value||0);
-  if(extra>0&&r.salidaTs){
-    r.salidaTs=new Date(new Date(r.salidaTs).getTime()+extra*3600000).toISOString();
-    r.horas=(r.horas||0)+extra;
-    notificadas.delete(id);
-    addLog('in',`Hab. ${id<10?'0'+id:id} — Extendida +${extra}h — ${r.cliente}`);
-  }
+  const val=document.getElementById('m-ext').value;
+  if(!val||!EXTENSIONES[val]){closeModal();renderRooms();return;}
+  const ext=EXTENSIONES[val];
+  // Sumar tiempo desde salidaTs actual (no desde ahora)
+  const salidaActual=r.salidaTs?new Date(r.salidaTs):now();
+  r.salidaTs=new Date(salidaActual.getTime()+ext.msExtra).toISOString();
+  if(ext.horas) r.horas=(r.horas||0)+ext.horas;
+  r.cobro=(r.cobro||0)+ext.cobro;
+  // Sumar al turno
+  ingresosDia+=ext.cobro;
+  if(turnoActual) turnoActual.ingresos+=ext.cobro;
+  notificadas.delete(id);
+  addLog('in',`Hab. ${id<10?'0'+id:id} — Extensión ${ext.label} +$${ext.cobro.toLocaleString('es-CL')} — nuevo cierre: ${fmt(new Date(r.salidaTs))}`);
+  dbGuardarHabitacion(r);
+  dbGuardarTurno();
   closeModal();renderRooms();
 }
 

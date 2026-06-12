@@ -653,13 +653,13 @@ async function iniciarTurno(nombre,esAdmin){
     .select('*').eq('nombre',nombre).eq('activo',true).is('fin',null).limit(1);
 
   if(turnosActivos&&turnosActivos.length>0){
-    // Reconectar al turno existente
+    // Reconectar al turno existente — logs frescos para esta sesión
     const t=turnosActivos[0];
     turnoActual={
       nombre:t.nombre,
       esAdmin:t.es_admin,
       inicio:t.inicio,
-      logs:Array.isArray(t.logs)?t.logs:[],
+      logs:[], // logs frescos — los históricos están en BD
       ingresos:t.ingresos||0,
       dbId:t.id
     };
@@ -687,7 +687,7 @@ function cerrarTurno(){
   const checkouts=turnoActual.logs.filter(l=>l.tipo==='out'&&l.msg.includes('Check-out')).length;
 
   // Ventas = logs de check-in con monto
-  const ventas=turnoActual.logs.filter(l=>l.tipo==='in'&&l.msg.includes('Check-in'));
+  const ventas=turnoActual.logs.filter(l=>l.tipo==='in'&&l.msg.includes('Check-in')&&!l.msg.includes('reconectada'));
   const detalleHtml=ventas.length>0
     ? [...ventas].reverse().map(v=>{
         // extraer monto del mensaje

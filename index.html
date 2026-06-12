@@ -305,25 +305,20 @@ async function dbGuardarHabitacion(r){
 async function dbGuardarTurno(){
   if(!turnoActual||!turnoActual.dbId)return;
   // Cargar logs existentes en BD y combinar con los nuevos
-  const {data:existing}=await supa.from('turnos').select('logs,ingresos').eq('id',turnoActual.dbId).single();
+  const {data:existing}=await supa.from('turnos').select('logs').eq('id',turnoActual.dbId).single();
   const logsExistentes=Array.isArray(existing?.logs)?existing.logs:[];
-  // Combinar: logs existentes + nuevos (evitar duplicados por ts)
+  // Combinar evitando duplicados por ts
   const tsExistentes=new Set(logsExistentes.map(l=>l.ts));
   const logsNuevos=turnoActual.logs.filter(l=>!tsExistentes.has(l.ts));
   const logsCombinados=[...logsExistentes,...logsNuevos];
-  // Ingresos: sumar lo nuevo a lo que ya había
-  const ingresosExistentes=existing?.ingresos||0;
-  const ingresosNuevos=turnoActual.ingresos;
+  // Ingresos: usar el total acumulado local (ya es correcto)
   await supa.from('turnos').update({
-    ingresos:ingresosExistentes+ingresosNuevos,
+    ingresos:turnoActual.ingresos,
     logs:logsCombinados,
     fin:turnoActual.fin||null,
     nota_cierre:turnoActual.notaCierre||null,
     activo:turnoActual.fin?false:true
   }).eq('id',turnoActual.dbId);
-  // Resetear ingresos locales para no duplicar en próxima llamada
-  turnoActual.ingresos=0;
-  ingresosDia=0;
 }
 
 async function dbCrearTurno(nombre,esAdmin){

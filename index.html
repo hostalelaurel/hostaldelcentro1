@@ -264,6 +264,7 @@ async function dbCargarHabitaciones(){
       r.nota=row.nota||'';
       r.entrada=row.entrada||null;
       r.salidaTs=row.salida_ts||null;
+      r.extensiones=Array.isArray(row.extensiones)?row.extensiones:[];
     }
   });
   mostrarEstadoConexion(true);
@@ -281,7 +282,8 @@ async function dbGuardarHabitacion(r){
     cliente:r.cliente||null,
     nota:r.nota||'',
     entrada:r.entrada||null,
-    salida_ts:r.salidaTs||null
+    salida_ts:r.salidaTs||null,
+    extensiones:r.extensiones||[]
   };
   const {error}=await supa.from('habitaciones').update(payload).eq('id',r.id);
   if(error){
@@ -335,9 +337,11 @@ async function dbCargarTurnos(){
 }
 
 // Realtime: escuchar cambios en habitaciones
+let realtimeChannel=null;
 function iniciarRealtime(){
+  if(realtimeChannel){realtimeChannel.unsubscribe();realtimeChannel=null;}
   // Suscripción realtime
-  supa.channel('habitaciones-cambios')
+  realtimeChannel=supa.channel('habitaciones-cambios')
     .on('postgres_changes',{event:'*',schema:'public',table:'habitaciones'},payload=>{
       const row=payload.new||payload.old;
       if(!row)return;
@@ -353,6 +357,7 @@ function iniciarRealtime(){
         r.nota=row.nota||'';
         r.entrada=row.entrada||null;
         r.salidaTs=row.salida_ts||null;
+        r.extensiones=Array.isArray(row.extensiones)?row.extensiones:[];
         renderRooms();
       }
       mostrarEstadoConexion(true);
@@ -361,11 +366,7 @@ function iniciarRealtime(){
       mostrarEstadoConexion(status==='SUBSCRIBED');
     });
 
-  // Polling de respaldo cada 30 segundos
-  setInterval(async()=>{
-    await dbCargarHabitaciones();
-    mostrarEstadoConexion(true);
-  }, 30000);
+  // Sin polling — se usa solo realtime
 }
 
 // Indicador de conexión
@@ -390,7 +391,7 @@ let turnoActual=null; // {nombre, inicio, logs:[], ingresos:0}
 let soloLectura=false;
 let todosLosTurnos=[]; // historial global
 let adminTab='turnos';
-let rooms=[1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21].map(id=>({id,status:'libre',tipo:null,horas:null,personas:null,dias:1,cobro:0,cliente:null,nota:'',entrada:null,salidaTs:null}));
+let rooms=[1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21].map(id=>({id,status:'libre',tipo:null,horas:null,personas:null,dias:1,cobro:0,cliente:null,nota:'',entrada:null,salidaTs:null,extensiones:[]}));
 let logs=[];
 let filtro='todas';
 let ingresosDia=0;
@@ -580,6 +581,7 @@ function renderRooms(){
       ${r.cliente&&r.tipo==='noche'?`<div class="room-cli">${r.cliente}</div>`:''}
       ${r.nota?`<div style="font-size:10px;color:#6b6a65;margin-top:1px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.nota}</div>`:''}
       ${mantHtml}
+      ${r.extensiones&&r.extensiones.length>0?r.extensiones.map(e=>`<div style="font-size:11px;color:#1a1a18;margin-top:2px;font-weight:700;text-align:right">+ ${e.label} $${e.cobro.toLocaleString('es-CL')}</div>`).join(''):''}
       ${timerHtml}
     </div>`;
   }).join('');
@@ -1180,6 +1182,8 @@ function extender(id){
   // Sumar al turno
   ingresosDia+=ext.cobro;
   if(turnoActual) turnoActual.ingresos+=ext.cobro;
+  if(!r.extensiones) r.extensiones=[];
+  r.extensiones.push({label:ext.label, cobro:ext.cobro});
   notificadas.delete(id);
   addLog('in',`Hab. ${id<10?'0'+id:id} — Extensión ${ext.label} +$${ext.cobro.toLocaleString('es-CL')} — nuevo cierre: ${fmt(new Date(r.salidaTs))}`);
   dbGuardarHabitacion(r);
@@ -1205,7 +1209,7 @@ function checkout(id){
     }
   }
   addLog('out',`Hab. ${id<10?'0'+id:id} — Check-out: ${r.cliente}${excedidoTxt}`);
-  r.status='libre';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;
+  r.status='libre';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];
   notificadas.delete(id);
   dbGuardarHabitacion(r);dbGuardarTurno();
   closeModal();renderRooms();
@@ -1213,7 +1217,7 @@ function checkout(id){
 
 function setMantDesdeLibre(id){
   const r=rooms.find(x=>x.id===id);
-  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;
+  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];
   addLog('mant',`Hab. ${id<10?'0'+id:id} — Cerrada por mantención`);
   closeModal();renderRooms();
 }
@@ -1221,7 +1225,7 @@ function setMantDesdeLibre(id){
 function setMant(id){
   const r=rooms.find(x=>x.id===id);
   addLog('mant',`Hab. ${id<10?'0'+id:id} — Puesta en mantención`);
-  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;
+  r.status='mantencion';r.tipo=null;r.horas=null;r.personas=null;r.dias=1;r.cobro=0;r.cliente=null;r.nota='';r.entrada=null;r.salidaTs=null;r.extensiones=[];
   notificadas.delete(id);
   dbGuardarHabitacion(r);
   closeModal();renderRooms();

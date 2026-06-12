@@ -734,11 +734,16 @@ function cerrarTurno(){
           const em=e.msg.match(/\+\$([\d.,]+)/);
           return`<span style="color:#1D9E75;font-weight:600;margin-left:6px">+ ${nm?nm[1]:''} $${em?em[1]:''}</span>`;
         }).join('');
-        return`<div style="display:grid;grid-template-columns:32px 42px 1fr auto;gap:4px;align-items:center;padding:3px 0;border-bottom:0.5px solid #f0f0eb;font-size:11px">
+        // Calcular total real = check-in + extensiones
+        const montoBase=monto?parseInt(monto[0].replace(/[.$]/g,'').replace(/\./g,''))||0:0;
+        const montoExts=extLogsT.reduce((s,e)=>{const m=e.msg.match(/\+\$([\d.,]+)/);return s+(m?parseInt(m[1].replace(/\./g,''))||0:0);},0);
+        const totalHab=montoBase+montoExts;
+        const totalFmt='$'+totalHab.toLocaleString('es-CL');
+        return`<div style="display:grid;grid-template-columns:32px 42px 1fr auto;gap:4px;align-items:center;padding:4px 0;border-bottom:0.5px solid #f0f0eb;font-size:11px">
           <span style="color:#9b9a95">${v.time}</span>
           <span style="font-weight:600;color:#1a1a18">${hab}</span>
-          <span style="color:#444;overflow:hidden;text-overflow:ellipsis">${tipo}${extHtmlT}${exceso?` <span style="color:#C0001A;font-weight:700;margin-left:4px">⚠ +${exceso}</span>`:''}</span>
-          <span style="font-weight:600;color:#0F6E56;white-space:nowrap">${monto?monto[0]:''}</span>
+          <span style="color:#444">${tipo} <span style="color:#9b9a95">${monto?monto[0]:''}</span>${extHtmlT}${exceso?` <span style="color:#C0001A;font-weight:700">⚠ +${exceso}</span>`:''}</span>
+          <span style="font-weight:700;color:#0F6E56;white-space:nowrap">${totalFmt}</span>
         </div>`;
       }).join('')
     : '<div style="font-size:11px;color:#9b9a95;padding:6px 0">Sin ventas.</div>';
@@ -975,7 +980,13 @@ function renderLog(){
             return`<span style="color:#1D9E75;font-weight:600;margin-left:12px">Extensión ${extDesc?extDesc[1]:''} ${extMonto?extMonto[1]:''}</span>`;
           }).join('')
         :'';
-      inTxt=`<span style="font-size:14px;font-weight:700;color:#185FA5;margin-right:10px">${g.in.time}</span><span class="hab-log-in">${desc}</span>${extHtml}`;
+      // Calcular total = check-in + extensiones
+      const montoBaseLog=inMsg.match(/\$[\d.,]+/);
+      const baseVal=montoBaseLog?parseInt(montoBaseLog[0].replace(/[$\.]/g,''))||0:0;
+      const extVal=extLogs.reduce((s,e)=>{const m=e.msg.match(/\+\$[\d.,]+/);return s+(m?parseInt(m[0].replace(/[\+$\.]/g,''))||0:0);},0);
+      const totalLog=baseVal+extVal;
+      const totalLogFmt=totalLog>0?'<span style="font-weight:700;color:#0F6E56;margin-left:10px">= $'+totalLog.toLocaleString('es-CL')+'</span>':'';
+      inTxt=`<span style="font-size:14px;font-weight:700;color:#185FA5;margin-right:10px">${g.in.time}</span><span class="hab-log-in">${desc}</span>${extHtml}${totalLogFmt}`;
     }
     const outTxt=g.out?`<span style="color:#9b9a95;font-size:10px">${g.out.time}</span> <span class="hab-log-out">Check-out${g.out.msg.includes('Exceso')?'  ⚠'+g.out.msg.split('Exceso:')[1]:''}</span>`:'<span style="color:#ccc;font-size:11px">En curso</span>';
     return`<div class="hab-log-row">

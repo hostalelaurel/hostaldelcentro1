@@ -1166,14 +1166,6 @@ function guardarNota(id){
   }
 }
 
-const EXTENSIONES={
-  'hora1': {label:'+1 hora',   horas:1,   msExtra:1*3600000,    cobro:8000},
-  'hora2': {label:'+2 horas',  horas:2,   msExtra:2*3600000,    cobro:15000},
-  'noche1':{label:'+1 noche',  horas:null,msExtra:24*3600000,   cobro:14000},
-  'noche2':{label:'+1 noche',  horas:null,msExtra:24*3600000,   cobro:9000},
-  'noche3':{label:'+1 noche',  horas:null,msExtra:24*3600000,   cobro:4000},
-};
-
 function extender(id){
   guardarNota(id);
   const r=rooms.find(x=>x.id===id);
